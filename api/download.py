@@ -5,6 +5,7 @@ import os
 from typing import Optional
 import logging
 from time import sleep
+import random
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -12,27 +13,29 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 随机User-Agent列表
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0'
+]
+
+def get_random_user_agent():
+    return random.choice(USER_AGENTS)
+
 def extract_with_retry(ydl, url, max_retries=3):
     """添加重试机制的视频信息提取"""
     for attempt in range(max_retries):
         try:
             logger.info(f"Attempt {attempt + 1} of {max_retries}")
-            # 首先尝试只获取基本信息
-            basic_info = ydl.extract_info(url, download=False, process=False)
-            if not basic_info:
-                raise Exception("No basic info returned")
-            
-            logger.info(f"Basic info extracted: {basic_info.get('title', 'Unknown')}")
-            
-            # 然后获取完整信息
-            full_info = ydl.extract_info(url, download=False)
-            logger.info("Full info extracted successfully")
-            return full_info
-            
+            return ydl.extract_info(url, download=False)
         except Exception as e:
-            logger.error(f"Attempt {attempt + 1} failed with error: {str(e)}")
+            logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
             if attempt + 1 < max_retries:
-                sleep(2)  # 增加重试等待时间
+                sleep(2)  # 在重试之前等待2秒
+                # 更新User-Agent
+                ydl.params['http_headers']['User-Agent'] = get_random_user_agent()
             else:
                 raise
 
@@ -46,39 +49,48 @@ async def download_video(url: str = Body(..., embed=True)):
             'format': 'best[height<=720]/bestvideo[height<=720]+bestaudio/best',
             'quiet': False,
             'no_warnings': False,
-            'extract_info_only': True,
             
             # 连接选项
-            'socket_timeout': 10,
-            'retries': 3,
+            'socket_timeout': 15,
+            'retries': 5,
             
             # 绕过限制选项
             'nocheckcertificate': True,
-            'ignoreerrors': False,  # 改为False以获取更详细的错误
+            'ignoreerrors': False,
             'no_color': True,
             'noprogress': True,
             'prefer_insecure': True,
             
             # 浏览器模拟
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'User-Agent': get_random_user_agent(),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.5',
                 'Accept-Encoding': 'gzip, deflate',
                 'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'DNT': '1',
             },
             
             # 地理位置选项
             'geo_bypass': True,
             'geo_bypass_country': 'US',
             
+            # 额外选项
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android'],
+                    'player_skip': ['webpage', 'configs'],
+                    'skip': ['dash', 'hls'],
+                }
+            },
+            
             # 调试选项
             'verbose': True,
-            'debug_printtraffic': True,
-            
-            # 格式选项
-            'format_sort': ['res:720', 'ext:mp4:m4a'],
-            'merge_output_format': 'mp4',
         }
         
         try:
@@ -90,7 +102,7 @@ async def download_video(url: str = Body(..., embed=True)):
                     logger.error("Failed to extract video info - no info returned")
                     raise HTTPException(
                         status_code=400, 
-                        detail="Failed to extract video info - please check if the video URL is correct and accessible"
+                        detail="无法获取视频信息 - 请检查视频URL是否正确"
                     )
                 
                 logger.info(f"Successfully extracted video info for: {info.get('title', 'Unknown')}")
@@ -116,7 +128,7 @@ async def download_video(url: str = Body(..., embed=True)):
                     logger.error("No valid formats found after filtering")
                     raise HTTPException(
                         status_code=400, 
-                        detail="No suitable download formats available for this video"
+                        detail="没有找到可用的下载格式"
                     )
                 
                 # 按分辨率排序
@@ -145,11 +157,13 @@ async def download_video(url: str = Body(..., embed=True)):
             error_message = str(e)
             logger.error(f"yt-dlp download error: {error_message}")
             if "Sign in to confirm your age" in error_message:
-                raise HTTPException(status_code=400, detail="无法下载年龄限制视频")
+                raise HTTPException(status_code=400, detail="���法下载年龄限制视频")
             elif "Private video" in error_message:
                 raise HTTPException(status_code=400, detail="无法访问私密视频")
             elif "Video unavailable" in error_message:
                 raise HTTPException(status_code=400, detail="视频不可用或已被删除")
+            elif "Sign in to confirm you're not a bot" in error_message:
+                raise HTTPException(status_code=400, detail="YouTube检测到机器人访问，请稍后再试")
             else:
                 raise HTTPException(status_code=400, detail=f"下载错误: {error_message}")
             
@@ -157,5 +171,5 @@ async def download_video(url: str = Body(..., embed=True)):
         logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(
             status_code=500, 
-            detail=f"服务器错误: {str(e)}\n请确保视频URL正确且可访问"
+            detail=f"服务器错误: {str(e)}\n请稍后重试"
         ) 
