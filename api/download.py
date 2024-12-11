@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from fastapi.responses import JSONResponse
 import yt_dlp
 import os
@@ -7,7 +7,7 @@ from typing import Optional
 router = APIRouter()
 
 @router.post("/download")
-async def download_video(url: str):
+async def download_video(url: str = Body(..., embed=True)):
     try:
         ydl_opts = {
             'format': 'best[height<=720]',
