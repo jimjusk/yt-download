@@ -1,34 +1,22 @@
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import yt_dlp
 import json
 import os
-import asyncio
 from pathlib import Path
-from datetime import datetime
-from fastapi.middleware.cors import CORSMiddleware
-
-# 初始化必要的目录结构
-def init_directories():
-    # 创建下载目录
-    downloads_dir = Path("downloads")
-    downloads_dir.mkdir(exist_ok=True)
-    
-    # 创建模板目录
-    templates_dir = Path("templates")
-    templates_dir.mkdir(exist_ok=True)
-    
-    # 创建空的video_info.json如果不存在
-    if not Path("video_info.json").exists():
-        with open("video_info.json", "w") as f:
-            f.write("")
-
-# 确保在应用启动前创建目录
-init_directories()
 
 app = FastAPI()
+
+# 添加错误处理
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={"message": str(exc)},
+    )
 
 # 添加 CORS 中间件
 app.add_middleware(
@@ -42,96 +30,16 @@ app.add_middleware(
 # 使用相对路径
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
-# 修改下载目录为 /tmp（Vercel 支持的可写目录）
-DOWNLOAD_DIR = "/tmp"
-if not os.path.exists(DOWNLOAD_DIR):
-    os.makedirs(DOWNLOAD_DIR)
-
-# 存储下载任务状态
-download_tasks = {}
-
-def get_video_info(url):
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': True
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        return ydl.extract_info(url, download=False)
-
-async def download_video(url: str, websocket: WebSocket):
-    def progress_hook(d):
-        if d['status'] == 'downloading':
-            progress = {
-                'status': 'downloading',
-                'percentage': d.get('_percent_str', '0%'),
-                'speed': d.get('_speed_str', 'N/A'),
-                'eta': d.get('_eta_str', 'N/A')
-            }
-            asyncio.create_task(websocket.send_json(progress))
-        elif d['status'] == 'finished':
-            progress = {'status': 'finished'}
-            asyncio.create_task(websocket.send_json(progress))
-
-    ydl_opts = {
-        'format': 'best[height<=720]',
-        'outtmpl': str(DOWNLOAD_DIR / '%(title)s.%(ext)s'),
-        'progress_hooks': [progress_hook],
-        'nocheckcertificate': True,
-        'ignoreerrors': True,
-        'no_warnings': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-        },
-        'format_sort': [
-            'res:720',
-            'ext:mp4:m4a',
-            'codec:h264:aac',
-        ],
-        'prefer_free_formats': True,
-    }
-    
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            video_info = {
-                'title': info['title'],
-                'duration': str(datetime.fromtimestamp(info['duration']).strftime('%H:%M:%S')),
-                'uploader': info['uploader'],
-                'description': info['description'],
-                'filename': ydl.prepare_filename(info),
-                'download_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
-            
-            # 保存视频信息到JSON文件
-            with open('video_info.json', 'a+') as f:
-                json.dump(video_info, f)
-                f.write('\n')
-                
-            return video_info
-    except Exception as e:
-        await websocket.send_json({'status': 'error', 'message': str(e)})
-        raise e
-
+# 简单的首页路由
 @app.get("/")
 async def home(request: Request):
-    # 读取已下载视频列表
-    videos = []
-    if os.path.exists('video_info.json'):
-        with open('video_info.json', 'r') as f:
-            for line in f:
-                if line.strip():
-                    videos.append(json.loads(line))
-    
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "videos": videos}
+        {"request": request, "videos": []}
     )
 
+# WebSocket 路由
 @app.websocket("/ws/download")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -139,19 +47,36 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             url = await websocket.receive_text()
-            video_info = await download_video(url, websocket)
-            await websocket.send_json({
-                'status': 'complete',
-                'video_info': video_info
-            })
+            try:
+                # 简化的下载选项
+                ydl_opts = {
+                    'format': 'best[height<=720]',
+                    'quiet': True,
+                    'no_warnings': True,
+                }
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    await websocket.send_json({
+                        'status': 'complete',
+                        'video_info': {
+                            'title': info.get('title', ''),
+                            'duration': info.get('duration', ''),
+                            'uploader': info.get('uploader', ''),
+                            'description': info.get('description', '')
+                        }
+                    })
+            except Exception as e:
+                await websocket.send_json({
+                    'status': 'error',
+                    'message': str(e)
+                })
     except Exception as e:
-        await websocket.send_json({
-            'status': 'error',
-            'message': str(e)
-        })
+        if not websocket.client_state.DISCONNECTED:
+            await websocket.send_json({
+                'status': 'error',
+                'message': str(e)
+            })
     finally:
-        await websocket.close() 
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+        if not websocket.client_state.DISCONNECTED:
+            await websocket.close() 

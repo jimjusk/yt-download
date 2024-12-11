@@ -1,102 +1,30 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Video Downloader</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>YouTube Downloader</title>
 </head>
-<body class="bg-gray-100">
-    <div class="container mx-auto px-4 py-8">
-        <!-- 标题部分 -->
-        <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-gray-800 mb-2">YouTube Video Downloader</h1>
-            <p class="text-gray-600">输入YouTube视频链接开始下载</p>
-        </div>
-
-        <!-- 下载表单 -->
-        <div class="max-w-xl mx-auto bg-white rounded-lg shadow-md p-6 mb-8">
-            <div class="flex gap-2">
-                <input type="text" id="url-input" 
-                    class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500"
-                    placeholder="https://www.youtube.com/watch?v=...">
-                <button id="download-btn" 
-                    class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
-                    下载
-                </button>
-            </div>
-            
-            <!-- 下载进度 -->
-            <div id="progress" class="mt-4 hidden">
-                <div class="h-2 bg-gray-200 rounded">
-                    <div id="progress-bar" class="h-2 bg-blue-500 rounded" style="width: 0%"></div>
-                </div>
-                <div id="progress-text" class="text-sm text-gray-600 mt-2"></div>
-            </div>
-        </div>
-
-        <!-- 视频列表 -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {% for video in videos %}
-            <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                <video class="w-full h-48 object-cover" controls>
-                    <source src="/downloads/{{ video.filename | replace('downloads/', '') }}" type="video/mp4">
-                </video>
-                <div class="p-4">
-                    <h3 class="font-semibold text-lg mb-2">{{ video.title }}</h3>
-                    <div class="text-sm text-gray-600">
-                        <p>时长: {{ video.duration }}</p>
-                        <p>作者: {{ video.uploader }}</p>
-                        <p>下载时间: {{ video.download_date }}</p>
-                        <p class="truncate">存储路径: {{ video.filename }}</p>
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
+<body>
+    <h1>YouTube Downloader</h1>
+    <input type="text" id="url" placeholder="输入YouTube视频URL">
+    <button onclick="downloadVideo()">下载</button>
+    <div id="progress"></div>
 
     <script>
-        const urlInput = document.getElementById('url-input');
-        const downloadBtn = document.getElementById('download-btn');
-        const progress = document.getElementById('progress');
-        const progressBar = document.getElementById('progress-bar');
-        const progressText = document.getElementById('progress-text');
-        
-        downloadBtn.addEventListener('click', async () => {
-            const url = urlInput.value.trim();
-            if (!url) return;
+        function downloadVideo() {
+            const url = document.getElementById('url').value;
+            const progress = document.getElementById('progress');
             
-            progress.classList.remove('hidden');
-            downloadBtn.disabled = true;
+            const ws = new WebSocket(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/download`);
             
-            const ws = new WebSocket(`ws://${window.location.host}/ws/download`);
-            
-            ws.onmessage = (event) => {
+            ws.onmessage = function(event) {
                 const data = JSON.parse(event.data);
-                
-                if (data.status === 'downloading') {
-                    progressBar.style.width = data.percentage;
-                    progressText.textContent = `下载中... ${data.percentage} (${data.speed}) ETA: ${data.eta}`;
-                }
-                else if (data.status === 'complete') {
-                    progressText.textContent = '下载完成!';
-                    setTimeout(() => {
-                        progress.classList.add('hidden');
-                        downloadBtn.disabled = false;
-                        location.reload(); // 刷新页面显示新视频
-                    }, 1000);
-                }
-                else if (data.status === 'error') {
-                    progressText.textContent = `错误: ${data.message}`;
-                    downloadBtn.disabled = false;
-                }
+                progress.textContent = JSON.stringify(data);
             };
             
-            ws.onopen = () => {
+            ws.onopen = function() {
                 ws.send(url);
             };
-        });
+        }
     </script>
 </body>
 </html> 
