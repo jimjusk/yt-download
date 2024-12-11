@@ -57,10 +57,10 @@
 </head>
 <body>
     <div class="container">
-        <h1>YouTube Downloader</h1>
+        <h1>YouTube 视频下载</h1>
         <div class="input-group">
             <input type="text" id="url" class="form-control" placeholder="输入YouTube视频URL">
-            <button class="btn btn-primary" onclick="getVideoInfo()">获取视频信息</button>
+            <button class="btn btn-primary" onclick="getVideoInfo()">下载</button>
         </div>
         <div id="progress"></div>
         <div id="download-options" class="mt-3"></div>
@@ -123,7 +123,7 @@
                         </div>
                     `;
                 } else {
-                    progress.innerHTML = `<div class="error">获���视频信息失败</div>`;
+                    progress.innerHTML = `<div class="error">获取视频信息失败</div>`;
                 }
             } catch (error) {
                 progress.innerHTML = `<div class="error">错误: ${error.message}</div>`;
