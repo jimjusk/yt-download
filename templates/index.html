@@ -91,6 +91,11 @@
                     body: JSON.stringify({ url })
                 });
                 
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || '请求失败');
+                }
+                
                 const data = await response.json();
                 
                 if (data.status === 'success') {
@@ -118,10 +123,11 @@
                         </div>
                     `;
                 } else {
-                    progress.innerHTML = `<div class="error">获取视频信息失败</div>`;
+                    progress.innerHTML = `<div class="error">获���视频信息失败</div>`;
                 }
             } catch (error) {
                 progress.innerHTML = `<div class="error">错误: ${error.message}</div>`;
+                console.error('Error:', error);
             } finally {
                 button.disabled = false;
             }
