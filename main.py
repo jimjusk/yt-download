@@ -8,6 +8,7 @@ import os
 import asyncio
 from pathlib import Path
 from datetime import datetime
+from fastapi.middleware.cors import CORSMiddleware
 
 # 初始化必要的目录结构
 def init_directories():
@@ -28,11 +29,25 @@ def init_directories():
 init_directories()
 
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
-app.mount("/downloads", StaticFiles(directory="downloads"), name="downloads")
 
-# 定义下载目录常量
-DOWNLOAD_DIR = Path("downloads")
+# 添加 CORS 中间件
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 使用相对路径
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
+# 修改下载目录为 /tmp（Vercel 支持的可写目录）
+DOWNLOAD_DIR = "/tmp"
+if not os.path.exists(DOWNLOAD_DIR):
+    os.makedirs(DOWNLOAD_DIR)
 
 # 存储下载任务状态
 download_tasks = {}
